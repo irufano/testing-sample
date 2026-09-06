@@ -121,15 +121,19 @@ Borrowings support `?status=&member_id=&book_id=&page=&limit=`.
 ## Testing
 
 Tests use `pytest` + FastAPI's `TestClient` (`httpx`), both declared as dev dependencies in
-`pyproject.toml` under `[dependency-groups].dev`.
+`pyproject.toml` under `[dependency-groups].dev`. Test discovery/config lives in
+`pyproject.toml` under `[tool.pytest.ini_options]`.
 
 ```bash
 cd library-api
-uv sync                # installs runtime + dev dependencies (pytest, httpx)
-uv run pytest          # runs the full suite once and exits non-zero on failure
-uv run pytest -v       # verbose output
-uv run pytest tests/test_borrowings.py   # run a single file
-uv run pytest -k "borrow"                # run tests matching a keyword
+uv sync                          # installs runtime + dev dependencies (pytest, httpx)
+uv run pytest                    # runs the full suite once and exits non-zero on failure
+uv run pytest -v                 # verbose output
+uv run pytest tests/unit         # unit tests only (fast, no DB)
+uv run pytest tests/integration  # integration tests only (real HTTP + in-memory DB)
+uv run pytest tests/e2e          # backend end-to-end flow(s) only
+uv run pytest tests/integration/test_borrowings.py   # run a single file
+uv run pytest -k "borrow"        # run tests matching a keyword
 ```
 
 No environment variables or external services are required: `tests/conftest.py` points the app at an
@@ -137,19 +141,45 @@ isolated in-memory SQLite database (via a `get_db` dependency override) before a
 `app.main`, so the test run never touches the local dev `library.db`. Each test function gets a freshly
 created/dropped schema, so tests don't leak state into each other.
 
-Coverage is integration-style, exercising the full route -> service -> repository -> db stack through the
-real HTTP endpoints:
+### Layout
 
-- `tests/test_health_and_envelope.py` — health checks and the shared success/error response envelope,
-  including that HTTP status always matches `info.code` for 404s, validation errors (422), and business
-  exceptions.
-- `tests/test_books.py` — book CRUD, ISBN uniqueness, `total_copies`/`available_copies` reconciliation on
-  update, delete guards (active borrowing / borrowing history), search/category filtering and pagination,
-  and a basic SQL-injection-safety check on the `search` query param.
-- `tests/test_members.py` — member CRUD, email uniqueness, status filtering, delete guards.
-- `tests/test_borrowings.py` — the borrow/return business flow: eligibility checks (book availability,
-  active member), default vs. explicit due dates, available-copies accounting on borrow/return, and
-  status/member/book filtering.
+- `tests/conftest.py` — shared fixtures: the in-memory DB/`get_db` override, a `client` (TestClient)
+  fixture, and `make_book`/`make_member`/`make_borrowing` factory fixtures for integration/e2e tests.
+- `tests/unit/` — isolated, no DB/HTTP: pydantic schema validation (`test_schemas.py`), config parsing
+  (`test_config.py`), the response envelope (`test_base_response.py`), the exception handlers including
+  the stacktrace-exposure behavior (`test_error_handlers.py`), and the service-layer business rules with
+  repositories replaced by mocks — ISBN/email uniqueness, `total_copies`/`available_copies` reconciliation,
+  delete guards, borrow/return eligibility and accounting (`test_book_service.py`, `test_member_service.py`,
+  `test_borrowing_service.py`).
+- `tests/integration/` — full route -> service -> repository -> db stack through the real HTTP endpoints:
+  - `test_health_and_envelope.py` — health checks and the shared success/error response envelope,
+    including that HTTP status always matches `info.code` for 404s, validation errors (422), and business
+    exceptions.
+  - `test_books.py` — book CRUD, ISBN uniqueness, `total_copies`/`available_copies` reconciliation on
+    update, delete guards (active borrowing / borrowing history), search/category filtering and pagination,
+    a field-length boundary check, and a SQL-injection-safety check on the `search` query param.
+  - `test_members.py` — member CRUD, email uniqueness, status filtering, delete guards, and a
+    SQL-injection-safety check on the `search` query param.
+  - `test_borrowings.py` — the borrow/return business flow: eligibility checks (book availability,
+    active member), default vs. explicit due dates, available-copies accounting on borrow/return, and
+    status/member/book filtering.
+- `tests/e2e/` — `test_borrowing_lifecycle.py`, a backend end-to-end test that drives the full
+  borrow -> return workflow across the books/members/borrowings endpoints in one flow, including the
+  delete guards before and after borrowing history exists.
+
+### Security coverage
+
+There's no authentication/authorization in this API yet (see below), so security tests focus on the
+risks that actually apply — injection safety and information disclosure:
+
+- SQL injection via the free-text `search` query param on `/books` and `/members` (parameterized
+  `ilike` queries; injection payloads must not error or return unexpected rows, and the tables must
+  survive intact).
+- Oversized/invalid input handling: field length/range limits (e.g. `title` > 255 chars, negative
+  `total_copies`, non-positive `book_id`/`member_id`) all fail with `422` rather than a raw DB error.
+- Stacktrace exposure: unhandled (500) errors only include a traceback when `ENVIRONMENT` is not
+  `production`, and business exceptions (404/409/422) never include one regardless of environment
+  (`tests/unit/test_error_handlers.py`, `tests/integration/test_health_and_envelope.py`).
 
 Out of scope (this phase): authentication/authorization (the API has none yet), CI/CD, deployment infra,
 notifications, payments, analytics — see the PRD for details.

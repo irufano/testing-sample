@@ -26,3 +26,5 @@ library-fe/yarn-debug.log*
 library-fe/yarn-error.log*
 library-fe/pnpm-debug.log*
 library-fe/lerna-debug.log*
+
+CLAUDE.md

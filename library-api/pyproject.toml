@@ -27,3 +27,12 @@ dev = [
     "httpx>=0.28.1",
     "pytest>=9.1.1",
 ]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+filterwarnings = [
+    # starlette 0.41.3 (pinned by fastapi==0.115.6) still imports the anyio 4.x
+    # BlockingPortal alias that anyio itself deprecated; third-party noise only.
+    "ignore:The anyio.abc.BlockingPortal alias is deprecated:DeprecationWarning:starlette.testclient",
+]
