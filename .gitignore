@@ -1,0 +1,28 @@
+# ===== OS / Editor =====
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*.swo
+
+# ===== library-api (Python) =====
+library-api/.venv/
+library-api/__pycache__/
+library-api/**/__pycache__/
+library-api/*.pyc
+library-api/*.db
+library-api/.env
+library-api/.pytest_cache/
+
+# ===== library-fe (Node / Vite) =====
+library-fe/node_modules/
+library-fe/dist/
+library-fe/dist-ssr/
+library-fe/*.local
+library-fe/*.log
+library-fe/npm-debug.log*
+library-fe/yarn-debug.log*
+library-fe/yarn-error.log*
+library-fe/pnpm-debug.log*
+library-fe/lerna-debug.log*
