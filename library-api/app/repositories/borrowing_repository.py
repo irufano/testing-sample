@@ -66,6 +66,14 @@ class BorrowingRepository:
         stmt = select(Borrowing.id).where(Borrowing.member_id == member_id, Borrowing.status == "borrowed").limit(1)
         return self.db.scalar(stmt) is not None
 
+    def count_active_for_member(self, member_id: int) -> int:
+        stmt = (
+            select(func.count())
+            .select_from(Borrowing)
+            .where(Borrowing.member_id == member_id, Borrowing.status == "borrowed")
+        )
+        return self.db.scalar(stmt) or 0
+
     def has_any_for_member(self, member_id: int) -> bool:
         stmt = select(Borrowing.id).where(Borrowing.member_id == member_id).limit(1)
         return self.db.scalar(stmt) is not None

@@ -14,6 +14,7 @@ from app.schemas.base_response import PaginatedData, Pagination
 from app.schemas.borrowing import BorrowingCreate, BorrowingDetailResponse
 
 DEFAULT_LOAN_PERIOD_DAYS = 14
+MAX_ACTIVE_BORROWINGS_PER_MEMBER = 3
 
 
 class BorrowingService:
@@ -54,6 +55,12 @@ class BorrowingService:
 
         if member.status != "active":
             raise UnprocessableEntityException(f"Member is not eligible to borrow (status: {member.status})")
+
+        active_count = self.repo.count_active_for_member(member.id)
+        if active_count >= MAX_ACTIVE_BORROWINGS_PER_MEMBER:
+            raise UnprocessableEntityException(
+                f"Member has reached the maximum of {MAX_ACTIVE_BORROWINGS_PER_MEMBER} active borrowings"
+            )
 
         if book.available_copies <= 0:
             raise UnprocessableEntityException("No available copies for this book")
