@@ -15,12 +15,17 @@ from app.models.book import Book
 from app.models.borrowing import Borrowing
 from app.models.member import Member
 from app.schemas.borrowing import BorrowingCreate
-from app.services.borrowing_service import DEFAULT_LOAN_PERIOD_DAYS, BorrowingService
+from app.services.borrowing_service import (
+    DEFAULT_LOAN_PERIOD_DAYS,
+    MAX_ACTIVE_BORROWINGS_PER_MEMBER,
+    BorrowingService,
+)
 
 
 def _service() -> BorrowingService:
     service = BorrowingService(db=MagicMock())
     service.repo = MagicMock()
+    service.repo.count_active_for_member.return_value = 0  # below the limit unless a test overrides it
     service.book_repo = MagicMock()
     service.member_repo = MagicMock()
     return service
@@ -76,6 +81,47 @@ class TestBorrow:
 
         with pytest.raises(UnprocessableEntityException):
             service.borrow(BorrowingCreate(book_id=1, member_id=1))
+
+    def test_rejects_when_member_reached_max_active_borrowings(self):
+        service = _service()
+        book = _book(available_copies=2)
+        service.book_repo.get_by_id.return_value = book
+        service.member_repo.get_by_id.return_value = _member()
+        service.repo.count_active_for_member.return_value = MAX_ACTIVE_BORROWINGS_PER_MEMBER
+
+        with pytest.raises(UnprocessableEntityException) as exc_info:
+            service.borrow(BorrowingCreate(book_id=1, member_id=1))
+
+        assert str(MAX_ACTIVE_BORROWINGS_PER_MEMBER) in str(exc_info.value)
+        assert "maximum" in str(exc_info.value).lower()
+        # Rejected before any mutation: the book's availability is untouched.
+        assert book.available_copies == 2
+        service.db.commit.assert_not_called()
+
+    def test_allows_borrow_when_active_count_is_one_below_max(self):
+        service = _service()
+        service.book_repo.get_by_id.return_value = _book(available_copies=2)
+        service.member_repo.get_by_id.return_value = _member()
+        service.repo.count_active_for_member.return_value = MAX_ACTIVE_BORROWINGS_PER_MEMBER - 1
+        service.repo.get_by_id.return_value = "final-result"
+        _capture_added(service)
+
+        result = service.borrow(BorrowingCreate(book_id=1, member_id=1))
+
+        assert result == "final-result"
+
+    def test_borrowing_limit_is_checked_before_availability(self):
+        """When a member is both at the limit and the book has no copies left,
+        the limit error must win so the caller sees the actionable reason."""
+        service = _service()
+        service.book_repo.get_by_id.return_value = _book(available_copies=0)
+        service.member_repo.get_by_id.return_value = _member()
+        service.repo.count_active_for_member.return_value = MAX_ACTIVE_BORROWINGS_PER_MEMBER
+
+        with pytest.raises(UnprocessableEntityException) as exc_info:
+            service.borrow(BorrowingCreate(book_id=1, member_id=1))
+
+        assert "maximum" in str(exc_info.value).lower()
 
     def test_decrements_available_copies_and_defaults_due_date(self):
         service = _service()

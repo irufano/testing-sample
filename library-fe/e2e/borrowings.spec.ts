@@ -84,4 +84,32 @@ test.describe("Borrowings", () => {
     await expect(row).toContainText(member.name);
     await expect(row).toContainText("Jan 15, 2027");
   });
+
+  test("blocks a borrow once the member has 3 active borrowings and shows the limit error", async ({
+    page,
+    request,
+  }) => {
+    const member = await apiCreateMember(request, { name: unique("Max Borrower") });
+    const activeBooks = await Promise.all(
+      [0, 1, 2].map((i) => apiCreateBook(request, { title: unique(`Active Loan Book ${i}`) })),
+    );
+    for (const book of activeBooks) {
+      await apiCreateBorrowing(request, book.id, member.id);
+    }
+    const fourthBook = await apiCreateBook(request, { title: unique("Fourth Loan Book") });
+
+    await page.goto("/borrowings");
+    await page.getByRole("button", { name: "+ Borrow a Book" }).click();
+    await expect(page.getByRole("heading", { name: "Borrow a Book" })).toBeVisible();
+
+    await page.getByLabel("Book").selectOption(String(fourthBook.id));
+    await page.getByLabel("Member").selectOption(String(member.id));
+    await page.getByRole("button", { name: "Borrow", exact: true }).click();
+
+    await expect(page.getByText(/maximum of 3 active borrowings/i)).toBeVisible();
+    // The modal stays open and no borrowing for the fourth book was created.
+    await expect(page.getByRole("heading", { name: "Borrow a Book" })).toBeVisible();
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await expect(page.getByRole("row", { name: new RegExp(fourthBook.title) })).not.toBeVisible();
+  });
 });

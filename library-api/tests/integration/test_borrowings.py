@@ -85,6 +85,45 @@ class TestBorrow:
 
         assert response.status_code == 404
 
+    def test_borrow_rejected_when_member_reaches_active_borrowing_limit(self, client, make_book, make_member):
+        member = make_member()
+        books = [make_book(isbn=f"LIMIT-{i}") for i in range(4)]
+
+        for book in books[:3]:
+            response = client.post(
+                "/api/v1/borrowings", json={"book_id": book["id"], "member_id": member["id"]}
+            )
+            assert response.status_code == 201
+
+        fourth = client.post(
+            "/api/v1/borrowings", json={"book_id": books[3]["id"], "member_id": member["id"]}
+        )
+
+        assert fourth.status_code == 422
+        assert "maximum" in fourth.json()["info"]["message"].lower()
+        # The book stays untouched: the rejected borrowing never decremented it.
+        book_after = client.get(f"/api/v1/books/{books[3]['id']}").json()["data"]
+        assert book_after["available_copies"] == books[3]["available_copies"]
+
+    def test_returning_a_borrowing_frees_a_slot_under_the_limit(self, client, make_book, make_member):
+        member = make_member()
+        books = [make_book(isbn=f"SLOT-{i}") for i in range(4)]
+        borrowings = []
+        for book in books[:3]:
+            response = client.post(
+                "/api/v1/borrowings", json={"book_id": book["id"], "member_id": member["id"]}
+            )
+            assert response.status_code == 201
+            borrowings.append(response.json()["data"])
+
+        client.post(f"/api/v1/borrowings/{borrowings[0]['id']}/return")
+
+        response = client.post(
+            "/api/v1/borrowings", json={"book_id": books[3]["id"], "member_id": member["id"]}
+        )
+
+        assert response.status_code == 201
+
     def test_borrow_rejects_non_positive_book_or_member_id(self, client, make_book, make_member):
         book = make_book()
         member = make_member()
